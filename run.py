@@ -11,7 +11,8 @@ from Models.nn_models import RallyTempose
 from Utils.tools import *
 from Utils.playerID_utils import *
 from collections import defaultdict
-from sklearn.model_selection import train_val_split
+from sklearn.model_selection import train_test_split
+
 import torch.nn.functional as F
 from transformers import BertModel, BertTokenizer
 import pandas as pd
@@ -32,9 +33,9 @@ def main(args):
     splitting = args.split
     #Load data
   
-    poses = pd.read_pickle('./Data/shuttleset/2d_poses_shuttleset_cont.pkl')
-    labels = pd.read_pickle('./Data/shuttleset/2d_labels_shuttleset_cont.pkl')
-    position = pd.read_pickle('./Data/shuttleset/2d_positions_shuttleset_cont.pkl')
+    poses = pd.read_pickle('./Data/poses.pkl')
+    labels = pd.read_pickle('./Data/labels.pkl')
+    position = pd.read_pickle('./Data/positions.pkl')
     match_info = pd.read_csv('./Data/shuttleset/match.csv')
     
     batch_size = 1
@@ -139,6 +140,31 @@ def main(args):
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay = 0.001)
     
     criterion = criterion.to(device)
+    start_epoch = 0
+    best_accuracy = 0
+
+    if args.pretrained_weights is not None and os.path.isfile(args.pretrained_weights):
+        print(f'Loading pretrained weights from {args.pretrained_weights}...')
+        checkpoint = torch.load(args.pretrained_weights, map_location=device,weights_only=False)
+
+        # Load model weights
+        model.load_state_dict(checkpoint['state_dict'])
+
+        # Optionally load optimizer state (for resuming training)
+        if args.resume_optimizer:
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            print('  ✓ Loaded optimizer state')
+
+        # Get best accuracy from checkpoint
+        best_accuracy = checkpoint.get('best_accuracy', 0)
+        print(f'  ✓ Loaded model weights (previous best acc: {best_accuracy:.2%})')
+
+        # Optionally get starting epoch
+        start_epoch = checkpoint.get('epoch', 0)
+        if args.resume_training:
+            print(f'  ✓ Resuming from epoch {start_epoch}')
+    else:
+        print('Training from scratch (no pretrained weights provided)')
 
     best_accuracy = load_best_model(model, optimizer,filename=model_filename)
 
@@ -310,6 +336,7 @@ def main(args):
             acc3_this_run = epAcc3/len(val_loader)
             best_epoch_this_run = epoch
             print(f'new best acc this run:{acc_this_run} at epoch {epoch}')
+            save_best_model(model, optimizer, acc_this_run, filename=model_filename)
 
         if currentLoss < best_loss:
             best_loss = currentLoss
@@ -337,6 +364,12 @@ if __name__ == "__main__":
     parser.add_argument("--LR", type=float, default=0.00005, help="LR during training")
     parser.add_argument("--clip_grad", type=int, default=1, help="clipping the gradient")
     parser.add_argument("--pseudo_bs", type=int, default=4, help="sum gradients")
+    parser.add_argument("--pretrained_weights", type=str, default=None,
+                        help="Path to pretrained .pt weights file")
+    parser.add_argument("--resume_optimizer", type=int, default=1,
+                        help="Resume optimizer state (1=yes, 0=no)")
+    parser.add_argument("--resume_training", type=int, default=0,
+                        help="Resume from checkpoint epoch (1=yes, 0=no)")
 
     args = parser.parse_args()
     main(args)

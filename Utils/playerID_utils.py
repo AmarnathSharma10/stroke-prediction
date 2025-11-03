@@ -8,11 +8,11 @@ import os
 import argparse
 from torch.utils.tensorboard import SummaryWriter
 from sklearn.metrics import accuracy_score
-#from TemPose_gcn_trans import Transformer
+# from TemPose_gcn_trans import Transformer
 
-from baselineModels import Transformer
+# from baselineModels import Transformer
 #from TemPose_gcn_trans import Transformer
-from utils import *
+# from utils import *
 from Utils.tools import *
 import optuna
 from collections import defaultdict
@@ -669,7 +669,8 @@ class PoseData_Forecast(Dataset): ### for the
             for j,n in enumerate(i):
                 if len(n[0])<=self.clip_len:
                     temp[j,:len(n),:len(n[0])] = n[:self.n_max]
-                    temp_pos[j,:len(n),:len(n[0])] = rearrange(pos[m][j],'t p x -> p t x',p=self.n_max)
+                    temp_pos[j, :pos[m][j].shape[0], :pos[m][j].shape[1]] = pos[m][j]
+
 
                     temporal_seq.append(len(n[0]))
 
@@ -680,7 +681,7 @@ class PoseData_Forecast(Dataset): ### for the
                     snip_loc = frames_len//self.clip_len#np.random.randint(0,frames_len-self.clip_len)
                     snip_stop = frames_len-frames_len%self.clip_len
                     temp[j,:len(n)] = n[:self.n_max, 0:snip_stop:snip_loc]
-                    temp_pos[j,:len(n)] = rearrange(pos[m][j],'t p x -> p t x',p=self.n_max)[:self.n_max, 0:snip_stop:snip_loc]
+                    temp_pos[j, :pos[m][j].shape[0], :pos[m][j].shape[1]] = pos[m][j]  # Use directly without rearrange
 
                     temporal_seq.append(len_max)
 
