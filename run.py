@@ -32,10 +32,9 @@ def main(args):
     model_filename= args.file_save#"best_model_shutset_rallytemposeII.pt" ### arg.model_checkpoint_file
     splitting = args.split
     #Load data
-  
-    poses = pd.read_pickle('./Data/poses.pkl')
-    labels = pd.read_pickle('./Data/labels.pkl')
-    position = pd.read_pickle('./Data/positions.pkl')
+    poses = pd.read_pickle(f'./Data/merged23_poses.pkl')
+    labels = pd.read_pickle(f'./Data/merged23_labels.pkl')
+    position = pd.read_pickle(f'./Data/merged23_positions.pkl')
     match_info = pd.read_csv('./Data/shuttleset/match.csv')
     
     batch_size = 1
@@ -53,8 +52,8 @@ def main(args):
     seq_len = 30
     min_len = 3
 
-    
-    data_train_raw, data_val_raw, target_train_raw, target_val_raw,pos_train_raw,pos_val_raw,Id_train_raw,Id_val_raw = prop_match_test_train_split(org_by_match,ratio= 0.20,r_state=splitting)
+    data_trainval_raw, data_test_raw, target_trainval_raw, target_test_raw, pos_trainval_raw, pos_test_raw, Id_trainval_raw, Id_test_raw = prop_match_test_train_split(org_by_match, ratio=0.15, r_state=splitting)
+    data_train_raw, data_val_raw, target_train_raw, target_val_raw, pos_train_raw, pos_val_raw, Id_train_raw, Id_val_raw = prop_match_test_train_split(org_by_match, ratio=0.20, r_state=splitting + 1)
     data_train_raw, target_train_raw, pos_train_raw,Id_train_raw = filter_sequences_by_lengthID(data_train_raw, target_train_raw, pos_train_raw,Id_train_raw, min_len, seq_len)
     data_val_raw, target_val_raw, pos_val_raw,Id_val_raw = filter_sequences_by_lengthID(data_val_raw, target_val_raw, pos_val_raw,Id_val_raw, min_len, seq_len)
     
@@ -63,7 +62,7 @@ def main(args):
     num_joints = 17# num keypoints (16) + position optionally (1)
     trg_vocab_size = 10
     
-    num_epochs = 300 
+    num_epochs = 500
     warmup_e_pr = 0.3
     learning_rate = args.LR
     learning_rate_min = 1e-6
@@ -103,6 +102,13 @@ def main(args):
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=0)
     
     val_loader = torch.utils.data.DataLoader(val_data, batch_size=batch_size, shuffle=False, num_workers=0)
+    data_test_raw, target_test_raw, pos_test_raw, Id_test_raw = filter_sequences_by_lengthID(data_test_raw,
+                                                                                             target_test_raw,
+                                                                                             pos_test_raw, Id_test_raw,
+                                                                                             min_len, seq_len)
+    test_data = PoseData_Forecast(data_test_raw, target_test_raw, pos=pos_test_raw, playerID=Id_test_raw,
+                                  len_max=max_len, factorized=True, multi_con=True, tjek_enc=False)
+    test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=0)
     model = RallyTempose(
         embedding_size,
         embed_size_spatial,
@@ -135,8 +141,8 @@ def main(args):
     criterion = nn.CrossEntropyLoss(label_smoothing=0.0)
 
     aux_criterion = nn.CrossEntropyLoss(label_smoothing=0.0)
-  
-   
+
+
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay = 0.001)
     
     criterion = criterion.to(device)
@@ -151,9 +157,11 @@ def main(args):
         model.load_state_dict(checkpoint['state_dict'])
 
         # Optionally load optimizer state (for resuming training)
-        if args.resume_optimizer:
+        if args.resume_optimizer and not args.reset_optimizer:
             optimizer.load_state_dict(checkpoint['optimizer'])
             print('  ✓ Loaded optimizer state')
+        else:
+            print('  ✓ Optimizer reset (fresh state)')
 
         # Get best accuracy from checkpoint
         best_accuracy = checkpoint.get('best_accuracy', 0)
@@ -166,7 +174,7 @@ def main(args):
     else:
         print('Training from scratch (no pretrained weights provided)')
 
-    best_accuracy = load_best_model(model, optimizer,filename=model_filename)
+    # best_accuracy = load_best_model(model, optimizer,filename=model_filename)
 
 
     print(f'starting training..')
@@ -186,7 +194,12 @@ def main(args):
     #tokenizer = BertTokenizer.from_pretrained(bert_model_name)
     print_int = 25
     ig_error_id = 9
-    for epoch in range(num_epochs):
+    log_df = pd.DataFrame(
+        columns=['epoch', 'train_acc', 'train_loss', 'val_acc', 'val_top2', 'val_top3', 'val_loss', 'test_acc',
+                 'test_top2', 'test_top3'])
+    log_filename = "training_log.csv"
+    start_epoch = start_epoch if args.resume_training else 0
+    for epoch in range(start_epoch, num_epochs):
     
         model.train()
         #
@@ -257,6 +270,8 @@ def main(args):
             if do_aux:
                 print(f'val aux task acc: {epauxAcc/len(train_loader)}')
 
+        train_acc_log = epAcc / len(train_loader)
+        train_loss_log = epLoss / len(train_loader)
         ### VALIDATION
 
         epLoss = 0
@@ -266,69 +281,117 @@ def main(args):
         epAcc2 = 0
         epAcc3 = 0
         #
+        epTestAcc = None
+        epTestAcc2 = None
+        epTestAcc3 = None
         optimizer.zero_grad()
         model.eval()
-        
-        for x, y,pad,x_id,text in val_loader: #### Fetch validation samples
-            x = x.type(torch.FloatTensor).to(device)
-            y = y.to(device)
-            x_id = x_id.to(device)
-            
-            pad = pad.to(device)
 
-            if bert_model_name is not None:
-                encoded_input = text['input_ids'].to(device)
-                
-                bert_mask = text['attention_mask'].to(device)
-                
-            else:
-                encoded_input = y.copy()
-                bert_mask = None
-            if do_aux:
-                yPred,aux_pred = model(x[:,shift:-1], encoded_input[:, shift:-1],x_id[:,shift:-1],pad[:,shift:-1],bert_mask=bert_mask[:,shift:-1])
-                loss1 = criterion(yPred[:,ignore_first:].reshape(-1, yPred.shape[2]), y[:,1+ignore_first+shift:].reshape(-1))
-                loss2 = aux_criterion(aux_pred[:,:].reshape(-1, aux_pred.shape[2]), y[:,shift:-1].reshape(-1))
-                loss = loss1 + aux_ratio*loss2
-            else: 
-                yPred = model(x[:,shift:-1], y[:, shift:-1],x_id[:,shift:-1],pad[:,shift:-1],bert_mask=bert_mask[:,shift:-1])
-                loss = criterion(yPred[:,ignore_first:,].reshape(-1, yPred.shape[2]), y[:,1+ignore_first+shift:].reshape(-1))
+        with torch.no_grad():
+            for x, y,pad,x_id,text in val_loader: #### Fetch validation samples
+                x = x.type(torch.FloatTensor).to(device)
+                y = y.to(device)
+                x_id = x_id.to(device)
 
-            epLoss += loss.item()
-            if parallel:
-                preds = model.module.predict(x[:,shift:-1], y[:, shift:-1],x_id[:,shift:-1],pad[:,shift:-1],bert_mask=bert_mask[:,shift:-1])[:,ignore_first:].reshape(-1) ## not used atm
-            else:
-                if do_aux:
-                    preds,aux_guees = model.predict(x[:,shift:-1], encoded_input[:, shift:-1],x_id[:,shift:-1],pad[:,shift:-1],bert_mask=bert_mask[:,shift:-1])
-                    preds = preds[:,ignore_first:].reshape(-1)
-                    aux_guees = aux_guees.reshape(-1)
-                    target1 = y[:,1+ignore_first+shift:].reshape(-1)
-                    target2 = y[:,shift:-1].reshape(-1)
-                    #acc = accuracy_score(preds.cpu().numpy(),target.cpu().numpy())#accuracy(y,yPred)
-                    acc = custom_accuracy_score(preds.cpu().numpy(),target1.cpu().numpy())#,trg_pad_idx) ## also implement top3 acc score
-                    acc2 = custom_top_k_accuracy(yPred[:,ignore_first:].reshape(-1, yPred.shape[2]).cpu().detach(),y[:,1+ignore_first+shift:].reshape(-1).cpu().detach(),k=2)#,ignore_index=9)
-                    acc3 = custom_top_k_accuracy(yPred[:,ignore_first:].reshape(-1, yPred.shape[2]).cpu().detach(),y[:,1+ignore_first+shift:].reshape(-1).cpu().detach(),k=3)#,ignore_index=9)
-                    aux_acc = custom_accuracy_score(aux_guees.cpu().numpy(),target2.cpu().numpy())#,trg_pad_idx)
-                    epauxAcc += aux_acc
+                pad = pad.to(device)
+
+                if bert_model_name is not None:
+                    encoded_input = text['input_ids'].to(device)
+
+                    bert_mask = text['attention_mask'].to(device)
+
                 else:
-                    preds = model.predict(x[:,shift:-1], y[:, shift:-1],x_id[:,shift:-1],pad[:,shift:-1],bert_mask=bert_mask[:,shift:-1])[:,ignore_first:].reshape(-1)
+                    encoded_input = y.copy()
+                    bert_mask = None
+                if do_aux:
+                    yPred,aux_pred = model(x[:,shift:-1], encoded_input[:, shift:-1],x_id[:,shift:-1],pad[:,shift:-1],bert_mask=bert_mask[:,shift:-1])
+                    loss1 = criterion(yPred[:,ignore_first:].reshape(-1, yPred.shape[2]), y[:,1+ignore_first+shift:].reshape(-1))
+                    loss2 = aux_criterion(aux_pred[:,:].reshape(-1, aux_pred.shape[2]), y[:,shift:-1].reshape(-1))
+                    loss = loss1 + aux_ratio*loss2
+                else:
+                    yPred = model(x[:,shift:-1], y[:, shift:-1],x_id[:,shift:-1],pad[:,shift:-1],bert_mask=bert_mask[:,shift:-1])
+                    loss = criterion(yPred[:,ignore_first:,].reshape(-1, yPred.shape[2]), y[:,1+ignore_first+shift:].reshape(-1))
 
-                    target = y[:,1+ignore_first+shift:].reshape(-1)
-                    #acc = accuracy_score(preds.cpu().numpy(),target.cpu().numpy())#accuracy(y,yPred)
-                    acc = custom_accuracy_score(preds.cpu().numpy(),target.cpu().numpy(),ig_error_id) ## also implement top3 acc score
-                    acc2 = custom_top_k_accuracy(yPred[:,ignore_first:].reshape(-1, yPred.shape[2]).cpu().detach(),y[:,1+ignore_first+shift:].reshape(-1).cpu().detach(),k=2)#,ignore_index=9)
-                    acc3 = custom_top_k_accuracy(yPred[:,ignore_first:].reshape(-1, yPred.shape[2]).cpu().detach(),y[:,1+ignore_first+shift:].reshape(-1).cpu().detach(),k=3)#,ignore_index=9)
+                epLoss += loss.item()
+                if parallel:
+                    preds = model.module.predict(x[:,shift:-1], y[:, shift:-1],x_id[:,shift:-1],pad[:,shift:-1],bert_mask=bert_mask[:,shift:-1])[:,ignore_first:].reshape(-1) ## not used atm
+                else:
+                    if do_aux:
+                        preds,aux_guees = model.predict(x[:,shift:-1], encoded_input[:, shift:-1],x_id[:,shift:-1],pad[:,shift:-1],bert_mask=bert_mask[:,shift:-1])
+                        preds = preds[:,ignore_first:].reshape(-1)
+                        aux_guees = aux_guees.reshape(-1)
+                        target1 = y[:,1+ignore_first+shift:].reshape(-1)
+                        target2 = y[:,shift:-1].reshape(-1)
+                        #acc = accuracy_score(preds.cpu().numpy(),target.cpu().numpy())#accuracy(y,yPred)
+                        acc = custom_accuracy_score(preds.cpu().numpy(),target1.cpu().numpy())#,trg_pad_idx) ## also implement top3 acc score
+                        acc2 = custom_top_k_accuracy(yPred[:,ignore_first:].reshape(-1, yPred.shape[2]).cpu().detach(),y[:,1+ignore_first+shift:].reshape(-1).cpu().detach(),k=2)#,ignore_index=9)
+                        acc3 = custom_top_k_accuracy(yPred[:,ignore_first:].reshape(-1, yPred.shape[2]).cpu().detach(),y[:,1+ignore_first+shift:].reshape(-1).cpu().detach(),k=3)#,ignore_index=9)
+                        aux_acc = custom_accuracy_score(aux_guees.cpu().numpy(),target2.cpu().numpy())#,trg_pad_idx)
+                        epauxAcc += aux_acc
+                    else:
+                        preds = model.predict(x[:,shift:-1], y[:, shift:-1],x_id[:,shift:-1],pad[:,shift:-1],bert_mask=bert_mask[:,shift:-1])[:,ignore_first:].reshape(-1)
 
-            epAcc += acc
-            epAcc2 += acc2
-            epAcc3 += acc3
+                        target = y[:,1+ignore_first+shift:].reshape(-1)
+                        #acc = accuracy_score(preds.cpu().numpy(),target.cpu().numpy())#accuracy(y,yPred)
+                        acc = custom_accuracy_score(preds.cpu().numpy(),target.cpu().numpy(),ig_error_id) ## also implement top3 acc score
+                        acc2 = custom_top_k_accuracy(yPred[:,ignore_first:].reshape(-1, yPred.shape[2]).cpu().detach(),y[:,1+ignore_first+shift:].reshape(-1).cpu().detach(),k=2)#,ignore_index=9)
+                        acc3 = custom_top_k_accuracy(yPred[:,ignore_first:].reshape(-1, yPred.shape[2]).cpu().detach(),y[:,1+ignore_first+shift:].reshape(-1).cpu().detach(),k=3)#,ignore_index=9)
+
+                epAcc += acc
+                epAcc2 += acc2
+                epAcc3 += acc3
         if epoch%print_int==0:
             print(f'epoch {epoch}: val acc: {epAcc/len(val_loader)} ## val acc top 2: {epAcc2/len(val_loader)} ## val acc top 3: {epAcc3/len(val_loader)} ## val loss: {epLoss/len(val_loader)}')
             if do_aux:
                 print(f'val aux task acc: {epauxAcc/len(val_loader)}')
+            epTestAcc = 0
+            epTestAcc2 = 0
+            epTestAcc3 = 0
+            model.eval()
+            with torch.no_grad():
+                for x, y, pad, x_id, text in test_loader:
+                    x = x.type(torch.FloatTensor).to(device)
+                    y = y.to(device)
+                    x_id = x_id.to(device)
+                    pad = pad.to(device)
+                    encoded_input = text['input_ids'].to(device)
+                    bert_mask = text['attention_mask'].to(device)
+
+                    yPred, _ = model(x[:, shift:-1], encoded_input[:, shift:-1], x_id[:, shift:-1], pad[:, shift:-1],
+                                     bert_mask=bert_mask[:, shift:-1])
+                    preds, _ = model.predict(x[:, shift:-1], encoded_input[:, shift:-1], x_id[:, shift:-1],
+                                             pad[:, shift:-1], bert_mask=bert_mask[:, shift:-1])
+                    preds = preds[:, ignore_first:].reshape(-1)
+                    target1 = y[:, 1 + ignore_first + shift:].reshape(-1)
+
+                    epTestAcc += custom_accuracy_score(preds.cpu().numpy(), target1.cpu().numpy())
+                    epTestAcc2 += custom_top_k_accuracy(
+                        yPred[:, ignore_first:].reshape(-1, yPred.shape[2]).cpu().detach(), target1.cpu().detach(), k=2)
+                    epTestAcc3 += custom_top_k_accuracy(
+                        yPred[:, ignore_first:].reshape(-1, yPred.shape[2]).cpu().detach(), target1.cpu().detach(), k=3)
+
+            print(
+                f'epoch {epoch}: TEST acc: {epTestAcc / len(test_loader)} ## top2: {epTestAcc2 / len(test_loader)} ## top3: {epTestAcc3 / len(test_loader)}')
+
 
         currentLoss = epLoss/len(val_loader)
         accuracy = epAcc/len(val_loader)
-        # 
+        #
+        if epoch%print_int==0:
+            log_row = {
+                'epoch': epoch,
+                'train_acc': train_acc_log,
+                'train_loss': train_loss_log,
+                'val_acc': epAcc / len(val_loader),
+                'val_top2': epAcc2 / len(val_loader),
+                'val_top3': epAcc3 / len(val_loader),
+                'val_loss': currentLoss,
+                'test_acc': epTestAcc / len(test_loader) if epTestAcc is not None else None,
+                'test_top2': epTestAcc2 / len(test_loader) if epTestAcc2 is not None else None,
+                'test_top3': epTestAcc3 / len(test_loader) if epTestAcc3 is not None else None,
+            }
+            log_df = pd.concat([log_df, pd.DataFrame([log_row])], ignore_index=True)
+            log_df.to_csv(log_filename, index=False)
 
         if accuracy>acc_this_run:
             acc_this_run = accuracy
@@ -370,6 +433,8 @@ if __name__ == "__main__":
                         help="Resume optimizer state (1=yes, 0=no)")
     parser.add_argument("--resume_training", type=int, default=0,
                         help="Resume from checkpoint epoch (1=yes, 0=no)")
+    parser.add_argument("--reset_optimizer", type=int, default=0,
+                        help="Reset optimizer state even when loading pretrained weights (1=yes, 0=no)")
 
     args = parser.parse_args()
     main(args)
