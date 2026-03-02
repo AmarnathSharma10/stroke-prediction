@@ -1,3 +1,8 @@
 *.log
 .vscode/
-data/
+*.pt
+__pycache__/
+todo.md
+*.csv
+LICENSE
+.venv/
