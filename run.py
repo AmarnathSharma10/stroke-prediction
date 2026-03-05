@@ -32,9 +32,9 @@ def main(args):
     model_filename= args.file_save#"best_model_shutset_rallytemposeII.pt" ### arg.model_checkpoint_file
     splitting = args.split
     #Load data
-    poses = pd.read_pickle(f'./Data/merged23_poses.pkl')
-    labels = pd.read_pickle(f'./Data/merged23_labels.pkl')
-    position = pd.read_pickle(f'./Data/merged23_positions.pkl')
+    poses = pd.read_pickle(f'pose_10_12_13_14_15_16_17_18_19_20_21_22_23_24_25_27_28_29_30_31_32_33_34_35_37_.pkl')
+    labels = pd.read_pickle(f'label_10_12_13_14_15_16_17_18_19_20_21_22_23_24_25_27_28_29_30_31_32_33_34_35_37_.pkl')
+    position = pd.read_pickle(f'position_10_12_13_14_15_16_17_18_19_20_21_22_23_24_25_27_28_29_30_31_32_33_34_35_37_.pkl')
     match_info = pd.read_csv('./Data/shuttleset/match.csv')
     
     batch_size = 1
