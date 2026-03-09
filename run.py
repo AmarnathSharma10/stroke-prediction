@@ -35,7 +35,7 @@ def main(args):
 
     poses = pd.read_pickle(f'/content/drive/MyDrive/MTP_dataset_amarnath/pose_10_12_13_14_15_16_17_18_19_20_21_22_23_24_25_27_28_29_30_31_32_33_34_35_37_.pkl')
     labels = pd.read_pickle(f'/content/drive/MyDrive/MTP_dataset_amarnath/label_10_12_13_14_15_16_17_18_19_20_21_22_23_24_25_27_28_29_30_31_32_33_34_35_37_.pkl')
-    position = pd.read_pickle(f'/content/drive/MyDrive/MTP_dataset_amarnath/ position_10_12_13_14_15_16_17_18_19_20_21_22_23_24_25_27_28_29_30_31_32_33_34_35_37_.pkl')
+    position = pd.read_pickle(f'/content/drive/MyDrive/MTP_dataset_amarnath/position_10_12_13_14_15_16_17_18_19_20_21_22_23_24_25_27_28_29_30_31_32_33_34_35_37_.pkl')
     match_info = pd.read_csv('/content/drive/MyDrive/MTP_dataset_amarnath/match.csv')
 
     batch_size = 1
@@ -248,9 +248,8 @@ def main(args):
                 preds = model.module.predict(x[:,shift:-1], y[:, shift:-1],x_id[:,shift:-1],pad[:,shift:-1],bert_mask=bert_mask[:,shift:-1])[:,ignore_first:].reshape(-1)
             else:
                 if do_aux:
-                    preds,aux_guees = model.predict(x[:,shift:-1], encoded_input[:, shift:-1],x_id[:,shift:-1],pad[:,shift:-1],bert_mask=bert_mask[:,shift:-1])
-                    preds = preds[:,ignore_first:].reshape(-1)
-                    aux_guees = aux_guees.reshape(-1)
+                    preds = yPred[:, ignore_first:].reshape(-1, yPred.shape[2]).argmax(dim=1)
+                    aux_guees = aux_pred[:, :].reshape(-1, aux_pred.shape[2]).argmax(dim=1)
                     target1 = y[:,1+ignore_first+shift:].reshape(-1)
                     target2 = y[:,shift:-1].reshape(-1)
                     
@@ -318,9 +317,8 @@ def main(args):
                     preds = model.module.predict(x[:,shift:-1], y[:, shift:-1],x_id[:,shift:-1],pad[:,shift:-1],bert_mask=bert_mask[:,shift:-1])[:,ignore_first:].reshape(-1) ## not used atm
                 else:
                     if do_aux:
-                        preds,aux_guees = model.predict(x[:,shift:-1], encoded_input[:, shift:-1],x_id[:,shift:-1],pad[:,shift:-1],bert_mask=bert_mask[:,shift:-1])
-                        preds = preds[:,ignore_first:].reshape(-1)
-                        aux_guees = aux_guees.reshape(-1)
+                        preds = yPred[:, ignore_first:].reshape(-1, yPred.shape[2]).argmax(dim=1)
+                        aux_guees = aux_pred[:, :].reshape(-1, aux_pred.shape[2]).argmax(dim=1)
                         target1 = y[:,1+ignore_first+shift:].reshape(-1)
                         target2 = y[:,shift:-1].reshape(-1)
                         #acc = accuracy_score(preds.cpu().numpy(),target.cpu().numpy())#accuracy(y,yPred)
@@ -360,9 +358,7 @@ def main(args):
 
                     yPred, _ = model(x[:, shift:-1], encoded_input[:, shift:-1], x_id[:, shift:-1], pad[:, shift:-1],
                                      bert_mask=bert_mask[:, shift:-1])
-                    preds, _ = model.predict(x[:, shift:-1], encoded_input[:, shift:-1], x_id[:, shift:-1],
-                                             pad[:, shift:-1], bert_mask=bert_mask[:, shift:-1])
-                    preds = preds[:, ignore_first:].reshape(-1)
+                    preds = yPred[:, ignore_first:].reshape(-1, yPred.shape[2]).argmax(dim=1)
                     target1 = y[:, 1 + ignore_first + shift:].reshape(-1)
 
                     epTestAcc += custom_accuracy_score(preds.cpu().numpy(), target1.cpu().numpy())
