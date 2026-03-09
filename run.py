@@ -32,11 +32,12 @@ def main(args):
     model_filename= args.file_save#"best_model_shutset_rallytemposeII.pt" ### arg.model_checkpoint_file
     splitting = args.split
     #Load data
-    poses = pd.read_pickle(f'pose_10_12_13_14_15_16_17_18_19_20_21_22_23_24_25_27_28_29_30_31_32_33_34_35_37_.pkl')
-    labels = pd.read_pickle(f'label_10_12_13_14_15_16_17_18_19_20_21_22_23_24_25_27_28_29_30_31_32_33_34_35_37_.pkl')
-    position = pd.read_pickle(f'position_10_12_13_14_15_16_17_18_19_20_21_22_23_24_25_27_28_29_30_31_32_33_34_35_37_.pkl')
-    match_info = pd.read_csv('./Data/shuttleset/match.csv')
-    
+
+    poses = pd.read_pickle(f'/content/drive/MyDrive/MTP_dataset_amarnath/pose_10_12_13_14_15_16_17_18_19_20_21_22_23_24_25_27_28_29_30_31_32_33_34_35_37_.pkl')
+    labels = pd.read_pickle(f'/content/drive/MyDrive/MTP_dataset_amarnath/label_10_12_13_14_15_16_17_18_19_20_21_22_23_24_25_27_28_29_30_31_32_33_34_35_37_.pkl')
+    position = pd.read_pickle(f'/content/drive/MyDrive/MTP_dataset_amarnath/ position_10_12_13_14_15_16_17_18_19_20_21_22_23_24_25_27_28_29_30_31_32_33_34_35_37_.pkl')
+    match_info = pd.read_csv('/content/drive/MyDrive/MTP_dataset_amarnath/match.csv')
+
     batch_size = 1
     import scipy
     if batch_size!=1:
